@@ -246,8 +246,8 @@ def play_login(page, url: str, username: str, password: str) -> bool:
     except:
         page.wait_for_timeout(3000)
     
-    # CRITICAL: Wait for validation messages to render
-    page.wait_for_timeout(2000)
+    # CRITICAL: Wait for validation/error messages to render (toasts take longer)
+    page.wait_for_timeout(3000)
     page.remove_listener("response", on_response)
     
     # === DECISION LOGIC ===
@@ -291,11 +291,19 @@ def play_login(page, url: str, username: str, password: str) -> bool:
     
     body = page.inner_text("body").lower()
     
-    # Check common error element selectors
-    for selector in ["[role='alert']", ".error", ".alert-danger", ".invalid-feedback", ".field-error", ".help-block"]:
+    # Check common error element selectors - expanded for toast notifications
+    error_selectors = [
+        "[role='alert']", ".error", ".alert-danger", ".invalid-feedback", ".field-error", ".help-block",
+        ".toast", ".notification", ".message", ".flash-message", ".alert", ".banner", ".snackbar",
+        ".toast-error", ".alert-error", ".message-error", ".form-error", ".login-error",
+        "[class*='error']", "[class*='toast']", "[class*='alert']", "[class*='message']"
+    ]
+    
+    for selector in error_selectors:
         try:
             els = page.locator(selector)
-            for i in range(els.count()):
+            count = els.count()
+            for i in range(count):
                 el = els.nth(i)
                 if el.is_visible():
                     txt = el.inner_text().lower()
@@ -303,6 +311,10 @@ def play_login(page, url: str, username: str, password: str) -> bool:
                         return False
         except:
             pass
+    
+    # Also check page content directly for common error phrases
+    if "invalid email or password" in body or "invalid email" in body or "wrong password" in body:
+        return False
     
     # Check body text for errors (only if still on login page)
     if any(x in curr for x in ["login", "signin", "auth"]):
