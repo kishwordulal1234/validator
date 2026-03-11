@@ -174,26 +174,58 @@ def play_login(page, url: str, username: str, password: str) -> bool:
     
     page.wait_for_timeout(1000)
     
-    # Find username/email and password fields
-    inputs = page.locator("input:visible").all()
-    if not inputs:
-        return False
-    
+    # Find username/email and password fields using specific selectors (like test_pw.py)
+    # Priority: type="email" > name/id contains email > type="text" in form
     email_input = None
     pass_input = None
     
-    for inp in inputs:
-        itype = inp.get_attribute("type")
-        iname = (inp.get_attribute("name") or "").lower()
-        iid = (inp.get_attribute("id") or "").lower()
-        pholder = (inp.get_attribute("placeholder") or "").lower()
-        sig = f"{itype} {iname} {iid} {pholder}"
-        
-        if itype == "password" or "pass" in sig:
-            pass_input = inp
-        elif itype in ("text", "email", "") or any(x in sig for x in ["user", "email", "log", "name"]):
-            if not email_input:
-                email_input = inp
+    # Try specific email selectors first
+    try:
+        email_input = page.locator("input[type='email']").first
+        if not email_input.is_visible():
+            email_input = None
+    except:
+        pass
+    
+    # Try name/id attributes if type selector didn't work
+    if not email_input:
+        try:
+            email_input = page.locator("input[name*='email'], input[id*='email']").first
+            if not email_input.is_visible():
+                email_input = None
+        except:
+            pass
+    
+    # Password field - always type="password"
+    try:
+        pass_input = page.locator("input[type='password']").first
+        if not pass_input.is_visible():
+            pass_input = None
+    except:
+        pass
+    
+    if not email_input or not pass_input:
+        # Fallback: old method but exclude search fields
+        inputs = page.locator("input:visible").all()
+        for inp in inputs:
+            itype = inp.get_attribute("type")
+            iname = (inp.get_attribute("name") or "").lower()
+            iid = (inp.get_attribute("id") or "").lower()
+            pholder = (inp.get_attribute("placeholder") or "").lower()
+            sig = f"{itype} {iname} {iid} {pholder}"
+            
+            # Skip search fields
+            if "search" in sig or "q" == iname or iid == "q":
+                continue
+            
+            if itype == "password":
+                pass_input = inp
+            elif itype == "email" or ("email" in sig and "user" in sig):
+                if not email_input:
+                    email_input = inp
+            elif itype in ("text", "") and not email_input:
+                if any(x in sig for x in ["user", "email", "log", "name", "id"]):
+                    email_input = inp
     
     if not email_input or not pass_input:
         return False
@@ -220,16 +252,37 @@ def play_login(page, url: str, username: str, password: str) -> bool:
     
     page.on("response", on_response)
     
-    # Click submit button
-    buttons = page.locator("button:visible, input[type='submit']:visible").all()
+    # Click submit button - use specific selector like test_pw.py
     submit = None
-    for btn in buttons:
-        txt = (btn.inner_text() or "").lower() + (btn.get_attribute("value") or "").lower()
-        if any(w in txt for w in ["log", "sign", "in", "submit", "enter", "continue"]):
-            submit = btn
-            break
-    if not submit and buttons:
-        submit = buttons[0]
+    try:
+        # Try exact "Sign In" text first (like test_pw.py)
+        submit = page.locator("button:has-text('Sign In')").first
+        if not submit.is_visible():
+            submit = None
+    except:
+        pass
+    
+    if not submit:
+        try:
+            # Try other common button texts
+            for btn_text in ["Login", "Log In", "Submit", "Continue"]:
+                submit = page.locator(f"button:has-text('{btn_text}')").first
+                if submit and submit.is_visible():
+                    break
+                submit = None
+        except:
+            pass
+    
+    if not submit:
+        # Fallback: any button near the password field or generic submit
+        buttons = page.locator("button:visible, input[type='submit']:visible").all()
+        for btn in buttons:
+            txt = (btn.inner_text() or "").lower() + (btn.get_attribute("value") or "").lower()
+            if any(w in txt for w in ["log", "sign", "submit", "enter"]):
+                submit = btn
+                break
+        if not submit and buttons:
+            submit = buttons[0]
     
     try:
         if submit:
@@ -433,7 +486,7 @@ def main():
     
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(headless=False)
             context = browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
                 ignore_https_errors=True
