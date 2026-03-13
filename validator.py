@@ -59,6 +59,12 @@ _exit_requested = False
 def _parse_line(raw: str) -> tuple[str, str, str] | None:
     line = raw.strip().lstrip('\ufeff')
     
+    # Helper to ensure URL has scheme
+    def ensure_scheme(url: str) -> str:
+        if not url.lower().startswith(('http://', 'https://')):
+            return 'https://' + url
+        return url
+    
     # Try pipe-separated format first: URL|username|password
     if '|' in line:
         parts = line.split('|')
@@ -67,31 +73,59 @@ def _parse_line(raw: str) -> tuple[str, str, str] | None:
             username = parts[1].strip()
             password = '|'.join(parts[2:]).strip()  # password may contain |
             
-            # Validate URL starts with http/https
-            if url.lower().startswith(('http://', 'https://')):
-                return url, username, password
+            # Auto-add https:// if no scheme
+            url = ensure_scheme(url)
+            return url, username, password
     
     # Fall back to colon-separated format: URL:username:password
+    # Need at least 4 parts: scheme, //host, path..., user, pass
     parts = line.split(":")
-    if len(parts) < 4:
+    if len(parts) < 3:
         return None
+    
     scheme = parts[0].lower()
-    if scheme not in ("http", "https"):
-        return None
-    url_parts = [parts[0], parts[1]]
-    i = 2
-    while i < len(parts) and "/" in parts[i]:
-        url_parts.append(parts[i])
+    
+    # Check if it has explicit scheme (http/https)
+    if scheme in ("http", "https"):
+        # Original parsing for URLs with scheme
+        if len(parts) < 4:
+            return None
+        url_parts = [parts[0], parts[1]]
+        i = 2
+        while i < len(parts) and "/" in parts[i]:
+            url_parts.append(parts[i])
+            i += 1
+        if i >= len(parts):
+            return None
+        url = ":".join(url_parts)
+        username = parts[i]
         i += 1
-    if i >= len(parts):
-        return None
-    url = ":".join(url_parts)
-    username = parts[i]
-    i += 1
-    if i >= len(parts):
-        return None
-    password = ":".join(parts[i:])
-    return url, username, password
+        if i >= len(parts):
+            return None
+        password = ":".join(parts[i:])
+        return url, username, password
+    else:
+        # No scheme - treat first part as domain
+        # Format: domain.com/path:user:pass
+        # Need at least: domain, user, pass (3 parts minimum)
+        # But path may contain colons, so we need to find where user/pass starts
+        
+        # Find the split point - look for username (often email or numeric)
+        # Heuristic: user is usually right before password, password often has special chars
+        # Try: domain/path:username:password
+        
+        # Join all parts, then try to find user:pass at the end
+        # Find the last two colons that separate user and pass
+        
+        # Simple approach: first part is URL (may include path), last two are user:pass
+        if len(parts) < 3:
+            return None
+        
+        # url is everything except last 2 parts
+        url = ensure_scheme(":".join(parts[:-2]))
+        username = parts[-2]
+        password = parts[-1]
+        return url, username, password
 
 
 def _tty_input(prompt_text: str) -> str:
